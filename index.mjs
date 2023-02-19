@@ -13,6 +13,8 @@ const MIME_TYPES = {
   "image/jpg": ".jpg",
   "image/png": ".png",
 };
+const FONT_SANS_SERIF_16_PX = "/home/kristian/projects/intagram-photos/assets/fonts/sans-serif.fnt";
+const FONT_SANS_SERIF_14_PX = "/home/kristian/projects/intagram-photos/assets/fonts/sans-serif-14.fnt";
 
 async function getUsername() {
   return (await (await fetch(URL + "/me" + QUERY_USER)).json()).username;
@@ -104,8 +106,8 @@ await async function getImages() {
       Readable.fromWeb(response.body).pipe(
         fs.createWriteStream(
           originalImagesFolder +
-            el.id +
-            MIME_TYPES[response.headers.get("content-type")]
+          el.id +
+          MIME_TYPES[response.headers.get("content-type")]
         )
       )
     );
@@ -117,6 +119,7 @@ await (async function editImage() {
   const data = JSON.parse(file);
   const editedImagesFolder = "_edited/" + data.username + "/";
   const originalImagesFolder = "_images/" + data.username + "/";
+  const WHITE_COLOR = 0xFFFFFFFF;
 
   if (!fs.existsSync(editedImagesFolder)) {
     fs.mkdirSync(editedImagesFolder, { recursive: true });
@@ -126,19 +129,70 @@ await (async function editImage() {
 
   console.log("everything loaded");
 
-  const font = await jimp.loadFont(jimp.FONT_SANS_12_BLACK);
+  const font = await jimp.loadFont(FONT_SANS_SERIF_16_PX);
+  const font14px = await jimp.loadFont(FONT_SANS_SERIF_14_PX);
   const smallFont = await jimp.loadFont(jimp.FONT_SANS_10_BLACK);
 
-  for (let i = 0; i < data.data.length - 1; i++) {
+  for (let i = 0; i < 10; i++) {
     const imageData = data.data[i];
 
     if (imageData.media_type !== "IMAGE") {
       continue;
     }
 
+    let textArray = [
+      data.username,
+      "Posted: " + (new Date(imageData.timestamp)).toLocaleDateString('sk-SK', { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      ...imageData.caption?.split('\n') ?? ['']
+    ];
+
+    textArray = textArray.filter(text => text !== '.');
+
     console.log("Image index: ", imageData.id);
 
-    const backgroundImage = await jimp.read("./background.jpg");
+    // Dimensions of image, that is used for final printing
+    const TOTAL_MAX_WIDTH = 375;
+    const TOTAL_MAX_HEIGHT = 500;
+
+    const BG_PADDING_TOP = 10;
+    const BG_PADDING_BOTTOM = 10;
+    const BG_PADDING_LEFT = 10;
+    const BG_PADDING_RIGHT = 10;
+
+    const MAX_IMAGE_HEIGHT = 276 - BG_PADDING_TOP;
+    const MAX_IMAGE_WIDTH = TOTAL_MAX_WIDTH - BG_PADDING_LEFT - BG_PADDING_RIGHT;
+
+    const IMAGE_PADDING_BOTTOM = 30;
+
+    const TEXT_DIFF_PARAGRAPH_PADDING = 10;
+    const TEXT_WIDTH = 15;
+    const TEXT_MAX_WIDTH = MAX_IMAGE_WIDTH - TEXT_WIDTH;
+
+    const sameTextParagraphPadding = 6;
+    const lineHeightPadding = 2;
+    let textHeight = 0;
+
+    textArray.forEach((text, index) => {
+      if (index === 0) {
+        textHeight += jimp.measureTextHeight(font, text, TEXT_MAX_WIDTH) + TEXT_DIFF_PARAGRAPH_PADDING;
+      }
+
+      if (index === 1) {
+        textHeight += jimp.measureTextHeight(smallFont, text, TEXT_MAX_WIDTH) + TEXT_DIFF_PARAGRAPH_PADDING;
+      }
+
+      if (index > 1) {
+        textHeight += jimp.measureTextHeight(font14px, text, TEXT_MAX_WIDTH) + sameTextParagraphPadding;
+      }
+    });
+
+    const REQUIRED_HEIGHT = BG_PADDING_TOP + MAX_IMAGE_HEIGHT + IMAGE_PADDING_BOTTOM + textHeight + BG_PADDING_BOTTOM;
+
+    const backgroundImage = TOTAL_MAX_HEIGHT - REQUIRED_HEIGHT <= 0 ? await generateImage(
+      WHITE_COLOR,
+      MAX_IMAGE_WIDTH + BG_PADDING_LEFT + BG_PADDING_RIGHT,
+      REQUIRED_HEIGHT,
+    ) : await generateImage(WHITE_COLOR, 375, 500);
 
     const image = await jimp.read(originalImagesFolder + imageData.id + ".jpg");
     const initialImageWidth = image._exif.imageSize.width;
@@ -149,59 +203,50 @@ await (async function editImage() {
     );
     const borderRadiusMask = await jimp.read("./mask-border-radius.jpg");
 
-    const MAX_HEIGHT = 266;
-    const MAX_WIDTH = 355;
-
     image.contain(
-      MAX_WIDTH,
-      MAX_HEIGHT,
+      MAX_IMAGE_WIDTH,
+      MAX_IMAGE_HEIGHT,
       jimp.HORIZONTAL_ALIGN_CENTER | jimp.VERTICAL_ALIGN_MIDDLE
     );
 
     blurredImage
       .gaussian(4)
       .cover(
-        MAX_WIDTH,
-        MAX_HEIGHT,
+        MAX_IMAGE_WIDTH,
+        MAX_IMAGE_HEIGHT,
         jimp.VERTICAL_ALIGN_MIDDLE | jimp.HORIZONTAL_ALIGN_CENTER
       )
       .mask(borderRadiusMask, 0, 0);
 
     if (initialImageHeight >= initialImageWidth) {
-      const newWidth = (MAX_HEIGHT / initialImageHeight) * initialImageWidth;
+      const newWidth = (MAX_IMAGE_HEIGHT / initialImageHeight) * initialImageWidth;
 
-      borderRadiusMask.resize(newWidth, MAX_HEIGHT);
-      image.mask(borderRadiusMask, (MAX_WIDTH - newWidth) / 2, 0);
+      borderRadiusMask.resize(newWidth, MAX_IMAGE_HEIGHT);
+      image.mask(borderRadiusMask, (MAX_IMAGE_WIDTH - newWidth) / 2, 0);
     } else {
-      const newHeight = (MAX_WIDTH / initialImageWidth) * initialImageHeight;
+      const newHeight = (MAX_IMAGE_WIDTH / initialImageWidth) * initialImageHeight;
 
-      borderRadiusMask.resize(MAX_WIDTH, newHeight);
-      image.mask(borderRadiusMask, 0, (MAX_HEIGHT - newHeight) / 2);
+      borderRadiusMask.resize(MAX_IMAGE_WIDTH, newHeight);
+      image.mask(borderRadiusMask, 0, (MAX_IMAGE_HEIGHT - newHeight) / 2);
     }
 
-    let lineY = 290;
-    const maxTextWidth = MAX_WIDTH - 15;
-    let textArray = [data.username, imageData.timestamp, ...imageData.caption?.split('\n') ?? ['']];
-    
-    textArray = textArray.filter(text => text !== '.');
+    let lineY = MAX_IMAGE_HEIGHT + IMAGE_PADDING_BOTTOM;
 
     textArray.forEach((text, index) => {
-        if(index === 0){
-            backgroundImage.print(font, 15, lineY, text, maxTextWidth);
-            lineY += jimp.measureTextHeight(font, text, maxTextWidth) + 6;
-        }
+      if (index === 0) {
+        backgroundImage.print(font, TEXT_WIDTH, lineY, text, TEXT_MAX_WIDTH);
+        lineY += jimp.measureTextHeight(font, text, TEXT_MAX_WIDTH) + TEXT_DIFF_PARAGRAPH_PADDING;
+      }
 
-        if(index === 1){
-            backgroundImage.print(smallFont, 15, lineY, text, maxTextWidth);
-            lineY += jimp.measureTextHeight(smallFont, text, maxTextWidth) + 6;
-        }
+      if (index === 1) {
+        backgroundImage.print(smallFont, TEXT_WIDTH, lineY, text, TEXT_MAX_WIDTH);
+        lineY += jimp.measureTextHeight(smallFont, text, TEXT_MAX_WIDTH) + TEXT_DIFF_PARAGRAPH_PADDING;
+      }
 
-        if(index > 1){
-            backgroundImage.print(font, 15, lineY, text, maxTextWidth);
-            lineY += jimp.measureTextHeight(font, text, maxTextWidth);
-        }
-
-
+      if (index > 1) {
+        backgroundImage.print(font14px, TEXT_WIDTH, lineY + lineHeightPadding, text, TEXT_MAX_WIDTH);
+        lineY += jimp.measureTextHeight(font14px, text, TEXT_MAX_WIDTH) + sameTextParagraphPadding;
+      }
     });
 
 
@@ -218,3 +263,13 @@ await (async function editImage() {
       .write(editedImagesFolder + images[i]);
   }
 })();
+
+async function generateImage(hexNumber, width, height) {
+  return new jimp(width, height, (err, image) => {
+    for (let row = 0; row < width; row++) {
+      for (let column = 0; column < height; column++) {
+        image.setPixelColor(hexNumber, row, column)
+      }
+    }
+  })
+}
