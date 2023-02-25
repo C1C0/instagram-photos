@@ -34,9 +34,15 @@ async function downloadChildren(mediaId) {
 
 await async function main() {
   const username = await getUsername();
-  const mediaFileName = process.env.MEDIA_FILE + "_" + username + ".json";
+  const mediaFileName = process.env.MEDIA_FOLDER + "/" + username + ".json";
+
   console.log("user:", username);
 
+  if(!fs.existsSync(process.env.MEDIA_FOLDER)){
+    fs.mkdir(process.env.MEDIA_FOLDER);
+  }
+
+  // Remove old user's media file
   if (fs.existsSync(mediaFileName)) {
     fs.rmSync(mediaFileName);
   }
