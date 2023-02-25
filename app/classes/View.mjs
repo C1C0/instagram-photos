@@ -2,12 +2,12 @@ import path from 'path';
 import fs from 'fs';
 import ejs from 'ejs';
 
-export class View{
+export class View {
     filePath = null;
     options = null;
 
-    constructor(viewName, options = null){
-        if(!viewName){
+    constructor(viewName, options = null) {
+        if (!viewName) {
             throw 'File path has to be defined';
         }
 
@@ -15,12 +15,12 @@ export class View{
         this.options = options;
     }
 
-    static _find(viewName){
+    static _find(viewName) {
         return path.join(BASEDIR, 'views', viewName + '.ejs');
     }
 
-    async read(){
-        if(!this.filePath){
+    async read() {
+        if (!this.filePath) {
             throw 'Incorrect view file path passed';
         }
 
