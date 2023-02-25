@@ -1,9 +1,10 @@
 import { Redirect } from "./Redirect.mjs";
 import { View } from "./View.mjs";
-import {ServerResponse} from 'http';
+import {ServerResponse, IncomingMessage} from 'http';
+import querystring from 'querystring';
 
-const ACTION_GET = 'GET';
-const ACTION_POST = 'POST';
+export const ACTION_GET = 'GET';
+export const ACTION_POST = 'POST';
 
 export class Router{
     static instance = null;
@@ -48,23 +49,36 @@ export class Router{
 
     /**
      * 
-     * @param {*} param0 
+     * @param {IncomingMessage} req 
      * @param {ServerResponse} res 
      * @returns 
      */
-    static async handle({headers, method, url}, res){
+    static async handle(req, res){
+        const url = new URL("http://localhost:5600" + req.url);
+        let incommingData = {};
 
-        console.log(`Connection: ${method}, at '${url}'`);
+        console.log(`Connection: ${req.method}, at '${url.pathname}'`);
 
-        if(!(url in Router.routes[method])){
+        req.on('data', (data) => {
+            incommingData = {...querystring.decode(data.toString())};
+        });
+
+        req.on('end', async () => {
+            
+        // Get $_GET parameters
+        for(const [key, value] of url.searchParams.entries()){
+            incommingData[key] = value;
+        }
+
+        // check if url found for action
+        if(!(url.pathname in Router.routes[req.method])){
             res.writeHead(404);
             res.end('404');
             return;
         }
 
-        const data = Router.routes[method][url](res);
+        const data = Router.routes[req.method][url.pathname](incommingData, res);
 
-        console.log(data);
         if(typeof data === "string"){
             res.setHeader("Content-Type", "text/html");
             res.end(data);
@@ -89,6 +103,7 @@ export class Router{
             res.end(JSON.stringify(data));
             return;
         }
+        })
     }
 
     static init(){
