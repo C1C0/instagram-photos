@@ -5,3 +5,6 @@ backup/
 backup/**/*
 _images/
 _edited/
+
+app/keys/*
+users-data
