@@ -1,0 +1,9 @@
+<%- include('./_partials/_head') %>
+
+<% if(showButton){ %>
+    <form action="fetch-instagram-token" method="post">
+        <input type="submit" value="Login to instagram" name="submit">
+    </form>
+<% } %>
+
+<%- include('./_partials/_footer') %>

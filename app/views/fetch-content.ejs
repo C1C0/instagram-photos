@@ -1,0 +1,12 @@
+<%- include('./_partials/_head') %>
+
+<% if(token){ %>
+    <form action="/fetch-content" method="post">
+        <input type="hidden" value="<%= token %>" name="authorizedToken"/>
+        <input type="submit" value="Fetch and edit my images" name="submit">
+    </form>
+<% } else{ %>
+    <p>Unfortunatelly, no token has been received from the server <br> try again</p>
+<% } %>
+
+<%- include('./_partials/_footer') %>
