@@ -1,6 +1,8 @@
 import fs from 'fs';
 import jimp from 'jimp';
 import { Readable } from 'stream';
+import axios from 'axios';
+import https from 'https';
 
 export const MIME_TYPES = {
     'image/jpeg': '.jpg',
@@ -8,145 +10,259 @@ export const MIME_TYPES = {
     'image/png': '.png'
 };
 
-const FONT_SANS_SERIF_16_PX =
-    global.app.BASEDIR + '/assets/fonts/sans-serif.fnt';
+const FONT_SANS_SERIF_16_PX = global.BASEDIR + '/assets/fonts/sans-serif.fnt';
 const FONT_SANS_SERIF_14_PX =
-    global.app.BASEDIR + '/assets/fonts/sans-serif-14.fnt';
+    global.BASEDIR + '/assets/fonts/sans-serif-14.fnt';
 
 export default class Fetcher {
     #graphPath = global.instagram.INSTAGRAM_GRAPH_PATH;
-    #accessToken = global.instagram.IG_TOKEN;
+    #mediaFolder = process.env.MEDIA_FOLDER;
+
+    #accessToken = null;
+
+    /**
+     * @type {string | null}
+     */
+    #username = null;
 
     #mediaFields = ['id', 'caption', 'media_url', 'media_type', 'timestamp'];
     #userFields = ['id', 'username'];
 
-    static start(){
-        ChildProcess.fork()
+    constructor(token) {
+        if (!token) {
+            throw 'Token Undefined';
+        }
+
+        this.#accessToken = token;
     }
 
-    async getUsername() {
+    getUserURL() {
+        return this.#graphPath + '/me' + this.#getQuery(this.#userFields);
+    }
+
+    getMediaURL() {
         return (
-            await (await fetch(this.#graphPath + '/me' + QUERY_USER)).json()
-        ).username;
-    }
-
-    async downloadAllMedia(next = null) {
-        const response = await fetch(
-            next ?? this.#graphPath + '/me/media' + QUERY_MEDIA
+            this.#graphPath + '/me/media' + this.#getQuery(this.#mediaFields)
         );
-        return await response.json();
     }
 
-    async downloadChildren(mediaId) {
-        const response = await fetch(
-            this.#graphPath + '/' + mediaId + '/children?' + QUERY_MEDIA
+    #getChildrenMediaURL(mediaId) {
+        return (
+            this.#graphPath +
+            '/' +
+            mediaId +
+            '/children' +
+            this.#getQuery(
+                this.#mediaFields.filter((field) => field !== 'caption')
+            )
         );
-        return await response.json();
     }
 
-    async main() {
-        const username = await getUsername();
-        const mediaFileName =
-            process.env.MEDIA_FOLDER + '/' + username + '.json';
+    #getQuery(fields = []) {
+        return (
+            '?fields=' + fields.join(',') + '&access_token=' + this.#accessToken
+        );
+    }
 
-        console.log('user:', username);
-
-        if (!fs.existsSync(process.env.MEDIA_FOLDER)) {
-            fs.mkdir(process.env.MEDIA_FOLDER);
-        }
-
-        // Remove old user's media file
-        if (fs.existsSync(mediaFileName)) {
-            fs.rmSync(mediaFileName);
-        }
-
-        const file = await fs.promises.open(mediaFileName, 'a+');
-
-        await file.write('{\n');
-
-        await file.write(`  "username":"${username}",
-              "data": [ `);
-
-        let body = null;
-        let nextLink = null;
-        let content = null;
-        let total = 0;
-
-        do {
-            body = await downloadAllMedia(nextLink);
-            nextLink = body?.paging?.next;
-            content = body.data;
-
-            total += body.data.length;
-
-            // get albums media
-            content.forEach(async (el) => {
-                if (el.media_type === 'CAROUSEL_ALBUM') {
-                    el.children = [];
-                    const content = await downloadChildren(el.id);
-                    const data = content.data;
-
-                    console.log(data);
-
-                    el.children.push(...data);
+    async #generateImage(hexNumber, width, height) {
+        return new jimp(width, height, (err, image) => {
+            for (let row = 0; row < width; row++) {
+                for (let column = 0; column < height; column++) {
+                    image.setPixelColor(hexNumber, row, column);
                 }
-            });
-
-            content = JSON.stringify(body.data);
-            content =
-                content.substring(1, content.length - 1) +
-                (nextLink ? ',' : '');
-
-            await file.write(content);
-
-            body = null;
-
-            console.log('Next batch: ', nextLink);
-        } while (nextLink);
-
-        await file.write(`], "total": ${total}}\n`);
-    }
-
-    async getImages() {
-        const file = fs.readFileSync('./media_cico.__.json');
-        const data = JSON.parse(file);
-        const originalImagesFolder = '_images/' + data.username + '/';
-
-        // Create dir
-        if (!fs.existsSync(originalImagesFolder)) {
-            fs.mkdirSync(originalImagesFolder, { recursive: true });
-        }
-
-        // Download images
-        data.data.forEach((el) => {
-            if (el.media_type !== 'IMAGE') {
-                return;
             }
-
-            fetch(el.media_url).then((response) =>
-                Readable.fromWeb(response.body).pipe(
-                    fs.createWriteStream(
-                        originalImagesFolder +
-                            el.id +
-                            MIME_TYPES[response.headers.get('content-type')]
-                    )
-                )
-            );
         });
     }
 
-    async editImage() {
-        const file = fs.readFileSync('./media_cico.__.json');
-        const data = JSON.parse(file);
-        const editedImagesFolder = '_edited/' + data.username + '/';
-        const originalImagesFolder = '_images/' + data.username + '/';
-        const WHITE_COLOR = 0xffffffff;
+    async #fetchUsername() {
+        const response = await fetch(this.getUserURL());
+        const userData = await response.json();
 
+        this.#username = userData.username;
+    }
+
+    async #fetchAllMedia(next = null) {
+        const response = await fetch(next ?? this.getMediaURL());
+        return await response.json();
+    }
+
+    async #fetchAllChildren(mediaId) {
+        console.log(this.#getChildrenMediaURL(mediaId));
+        const response = await fetch(this.#getChildrenMediaURL(mediaId));
+        return await response.json();
+    }
+
+    #checkAndCreateMediaFolder(mediaFileName) {
+        if (!fs.existsSync(this.#mediaFolder)) {
+            fs.mkdirSync(this.#mediaFolder);
+        }
+
+        const mediaFileDir = mediaFileName.split('/').slice(0, -1).join('/');
+        if (!fs.existsSync(mediaFileDir)) {
+            console.log('Creating dir', mediaFileDir);
+            fs.mkdirSync(mediaFileDir);
+        }
+    }
+
+    #checkAndRemoveUserJson(mediaFileName) {
+        if (fs.existsSync(mediaFileName)) {
+            fs.rmSync(mediaFileName);
+        }
+    }
+
+    async #fetchAlbumsMedia(album) {
+        console.log('album', album);
+        album.children = [];
+        const content = await this.#fetchAllChildren(album.id);
+        console.log('content', content);
+        const data = content.data;
+
+        album.children.push(...data);
+    }
+
+    #getUsersFolderPath() {
+        return (
+            this.#mediaFolder + '/' + this.#username.replace(/(\.)/g, '') + '/'
+        );
+    }
+
+    #getUsersJSONDataPath() {
+        return this.#getUsersFolderPath() + 'data.json';
+    }
+
+    #getUsersImagesPath() {
+        return this.#getUsersFolderPath() + 'images/';
+    }
+
+    #getUsersEditedPath() {
+        return this.#getUsersFolderPath() + 'edited/';
+    }
+
+    async #fetchUserData() {
+        await this.#fetchUsername();
+        console.log('username fetched');
+
+        if (!this.#username) {
+            throw 'username undefined';
+        }
+
+        const mediaFileName = this.#getUsersJSONDataPath();
+        console.log('Media file', mediaFileName);
+
+        this.#checkAndCreateMediaFolder(mediaFileName);
+        this.#checkAndRemoveUserJson(mediaFileName);
+
+        let body,
+            nextLink,
+            content,
+            total = 0;
+
+        const file = await fs.promises.open(mediaFileName, 'a+');
+        await file.write(`
+{
+    "username":"${this.#username}",
+    "data": [
+        `);
+
+        let max = 1;
+        let actual = 0;
+
+        // data (images links, description, time, etc...)
+        do {
+            actual++;
+            body = await this.#fetchAllMedia(nextLink);
+
+            console.log('fetched all media');
+
+            nextLink = body?.paging?.next;
+            content = body.data;
+            total += body.data.length;
+
+            // get albums media
+            // for (let part of content) {
+            //     if (part.media_type === 'CAROUSEL_ALBUM') {
+            //         await this.#fetchAlbumsMedia(part);
+            //     }
+            // }
+            content = JSON.stringify(body.data);
+
+            // Determine, if trailing comma needed for next batch of data
+            content =
+                content.substring(1, content.length - 1) +
+                (nextLink && actual < max ? ',' : '');
+
+            await file.write(content);
+        } while (nextLink && actual < max);
+
+        await file.write(
+            `
+    ], "total": ${total}
+}`
+        );
+
+        console.log('Fetching finished');
+    }
+
+    #checkAndCreateUsersImageFolder(originalImagesFolder) {
+        if (!fs.existsSync(originalImagesFolder)) {
+            fs.mkdirSync(originalImagesFolder, { recursive: true });
+        }
+    }
+
+    async #getAndSaveImage(contentData, originalImagesFolder) {
+        await fetch(contentData.media_url)
+            .then(async (response) => [
+                await response.arrayBuffer(),
+                response.headers.get('content-type')
+            ])
+            .then(async ([arrayBuffer, mimeTypeHeader]) => {
+                const finalDestination =
+                    global.BASEDIR +
+                    '/../' +
+                    originalImagesFolder +
+                    contentData.id +
+                    MIME_TYPES[mimeTypeHeader];
+
+                fs.writeFileSync(finalDestination, Buffer.from(arrayBuffer));
+            });
+    }
+
+    async #getImages() {
+        const file = fs.readFileSync(this.#getUsersJSONDataPath());
+
+        const data = JSON.parse(file.toString());
+
+        const originalImagesFolder = this.#getUsersImagesPath();
+        this.#checkAndCreateUsersImageFolder(originalImagesFolder);
+
+        for (let el of data.data) {
+            if (el.media_type !== 'IMAGE') {
+                continue;
+            }
+
+            await this.#getAndSaveImage(el, originalImagesFolder);
+        }
+
+        console.log('finished fetching images');
+    }
+
+    #checkAndCreateEditedImagesFolder(editedImagesFolder) {
         if (!fs.existsSync(editedImagesFolder)) {
             fs.mkdirSync(editedImagesFolder, { recursive: true });
         }
+    }
 
+    async #editImages() {
+        const file = fs.readFileSync(this.#getUsersJSONDataPath());
+        const data = JSON.parse(file);
+
+        const editedImagesFolder = this.#getUsersEditedPath();
+        const originalImagesFolder = this.#getUsersImagesPath();
+
+        const WHITE_COLOR = 0xffffffff;
         const images = fs.readdirSync(originalImagesFolder);
+
+        this.#checkAndCreateEditedImagesFolder(editedImagesFolder);
 
         console.log('everything loaded');
 
@@ -156,6 +272,8 @@ export default class Fetcher {
 
         for (let i = 0; i < 10; i++) {
             const imageData = data.data[i];
+
+            console.log('image', imageData);
 
             if (imageData.media_type !== 'IMAGE') {
                 continue;
@@ -231,12 +349,12 @@ export default class Fetcher {
 
             const backgroundImage =
                 TOTAL_MAX_HEIGHT - REQUIRED_HEIGHT <= 0
-                    ? await generateImage(
+                    ? await this.#generateImage(
                           WHITE_COLOR,
                           MAX_IMAGE_WIDTH + BG_PADDING_LEFT + BG_PADDING_RIGHT,
                           REQUIRED_HEIGHT
                       )
-                    : await generateImage(WHITE_COLOR, 375, 500);
+                    : await this.#generateImage(WHITE_COLOR, 375, 500);
 
             const image = await jimp.read(
                 originalImagesFolder + imageData.id + '.jpg'
@@ -248,7 +366,7 @@ export default class Fetcher {
                 originalImagesFolder + imageData.id + '.jpg'
             );
             const borderRadiusMask = await jimp.read(
-                './mask-border-radius.jpg'
+                global.BASEDIR + '/../mask-border-radius.jpg'
             );
 
             image.contain(
@@ -350,13 +468,9 @@ export default class Fetcher {
         }
     }
 
-    async generateImage(hexNumber, width, height) {
-        return new jimp(width, height, (err, image) => {
-            for (let row = 0; row < width; row++) {
-                for (let column = 0; column < height; column++) {
-                    image.setPixelColor(hexNumber, row, column);
-                }
-            }
-        });
+    async start() {
+        await this.#fetchUserData();
+        await this.#getImages();
+        await this.#editImages();
     }
 }

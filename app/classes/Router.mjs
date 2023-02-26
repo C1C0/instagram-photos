@@ -64,6 +64,8 @@ export class Router {
         });
 
         req.on('end', async () => {
+            console.log('end init');
+
             // Get $_GET parameters
             for (const [key, value] of url.searchParams.entries()) {
                 incommingData[key] = value;
@@ -76,7 +78,7 @@ export class Router {
                 return;
             }
 
-            const data = Router.routes[req.method][url.pathname](
+            const data = await Router.routes[req.method][url.pathname](
                 incommingData,
                 res
             );
@@ -88,6 +90,7 @@ export class Router {
             }
 
             if (data instanceof View) {
+                console.log('returning view');
                 res.setHeader('Content-Type', 'text/html');
                 res.end(await data.read());
                 return;

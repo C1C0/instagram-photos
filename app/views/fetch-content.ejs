@@ -1,8 +1,8 @@
 <%- include('./_partials/_head') %>
 
-<% if(code){ %>
+<% if(token){ %>
     <form action="/fetch-content" method="post">
-        <input type="hidden" value="<%= code %>" name="authorizedToken"/>
+        <input type="hidden" value="<%= token %>" name="authorizedToken"/>
         <input type="submit" value="Fetch and edit my images" name="submit">
     </form>
 <% } else{ %>

@@ -1,12 +1,11 @@
-console.log('fetching');
+import '../bootstrap.mjs';
+import Fetcher from '../classes/Fetcher.mjs';
 
-async function wait() {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            console.log('finished');
-            resolve();
-        }, 5000);
-    });
-}
+const token = process.argv[2].split('=')[1];
+const fetcher = new Fetcher(token);
 
-await wait();
+await fetcher.start();
+
+console.log('finished process');
+
+process.exit(0);
