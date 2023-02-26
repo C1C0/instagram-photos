@@ -1,8 +1,5 @@
 import fs from 'fs';
 import jimp from 'jimp';
-import { Readable } from 'stream';
-import axios from 'axios';
-import https from 'https';
 
 export const MIME_TYPES = {
     'image/jpeg': '.jpg',
