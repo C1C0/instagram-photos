@@ -419,7 +419,7 @@ export default class Fetcher {
         return newTextArray;
     }
 
-    async #editImage(
+    async #editImageJimp(
         imageWidth,
         imageHeight,
         textArray,
@@ -563,7 +563,7 @@ export default class Fetcher {
             .write(saveImagePath);
     }
 
-    async #editImages() {
+    async #editImagesJimp() {
         const file = fs.readFileSync(this.#getUsersJSONDataPath());
         const data = JSON.parse(file);
 
@@ -677,7 +677,7 @@ export default class Fetcher {
                 this.#BG_PADDING_RIGHT;
 
             // Create original
-            await this.#editImage(
+            await this.#editImageJimp(
                 width,
                 requiredHeight,
                 textArray,
@@ -687,7 +687,7 @@ export default class Fetcher {
         }
 
         // Create cropped
-        await this.#editImage(
+        await this.#editImageJimp(
             this.#TOTAL_MAX_WIDTH,
             this.#TOTAL_MAX_HEIGHT,
             overflowsImage ? this.#getTextArrayWhichFits(textArray) : textArray,
@@ -707,9 +707,9 @@ export default class Fetcher {
     }
 
     async start() {
-        await this.#fetchUserData();
-        await this.#getImages();
-        await this.#editImages();
+        // await this.#fetchUserData();
+        // await this.#getImages();
+        await this.#editImagesJimp();
 
         await this.sleep(1000);
     }
