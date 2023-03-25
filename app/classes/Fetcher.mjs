@@ -25,12 +25,54 @@ export default class Fetcher {
     #mediaFields = ['id', 'caption', 'media_url', 'media_type', 'timestamp'];
     #userFields = ['id', 'username'];
 
-    constructor(token) {
+    // Dimensions of image, that is used for final printing
+    #TOTAL_MAX_WIDTH = 375;
+    #TOTAL_MAX_HEIGHT = 500;
+
+    #BG_PADDING_TOP = 10;
+    #BG_PADDING_BOTTOM = 10;
+    #BG_PADDING_LEFT = 10;
+    #BG_PADDING_RIGHT = 10;
+
+    #MAX_IMAGE_HEIGHT = 276 - this.#BG_PADDING_TOP;
+    #MAX_IMAGE_WIDTH =
+        this.#TOTAL_MAX_WIDTH - this.#BG_PADDING_LEFT - this.#BG_PADDING_RIGHT;
+
+    #IMAGE_PADDING_BOTTOM = 30;
+
+    #TEXT_DIFF_PARAGRAPH_PADDING = 10;
+    #TEXT_WIDTH = 15;
+    #TEXT_MAX_WIDTH = this.#MAX_IMAGE_WIDTH - this.#TEXT_WIDTH;
+
+    #SAME_TEXT_PARAGRAPH_PADDING = 6;
+    #LINE_HEIGHT_PADDING = 2;
+
+    #FONT = null;
+    #FONT14PX = null;
+    #SMALLFONT = null;
+
+    #COLORS = {
+        WHITE: 0xffffffff
+    };
+
+    constructor(token, font, font14px, smallFont) {
         if (!token) {
             throw 'Token Undefined';
         }
 
         this.#accessToken = token;
+
+        this.#FONT = font;
+        this.#FONT14PX = font14px;
+        this.#SMALLFONT = smallFont;
+    }
+
+    static async make(token) {
+        const font = await jimp.loadFont(FONT_SANS_SERIF_16_PX);
+        const font14px = await jimp.loadFont(FONT_SANS_SERIF_14_PX);
+        const smallFont = await jimp.loadFont(jimp.FONT_SANS_10_BLACK);
+
+        return new this(token, font, font14px, smallFont);
     }
 
     getUserURL() {
@@ -135,6 +177,10 @@ export default class Fetcher {
         return this.#getUsersFolderPath() + 'edited/';
     }
 
+    #getUsersOriginalEditedPath() {
+        return this.#getUsersFolderPath() + 'edited/original/';
+    }
+
     async #fetchUserData() {
         await this.#fetchUsername();
         console.log('username fetched');
@@ -161,12 +207,8 @@ export default class Fetcher {
     "data": [
         `);
 
-        let max = 1;
-        let actual = 0;
-
         // data (images links, description, time, etc...)
         do {
-            actual++;
             body = await this.#fetchAllMedia(nextLink);
 
             console.log('fetched all media');
@@ -176,20 +218,20 @@ export default class Fetcher {
             total += body.data.length;
 
             // get albums media
-            // for (let part of content) {
-            //     if (part.media_type === 'CAROUSEL_ALBUM') {
-            //         await this.#fetchAlbumsMedia(part);
-            //     }
-            // }
+            for (let part of content) {
+                if (part.media_type === 'CAROUSEL_ALBUM') {
+                    await this.#fetchAlbumsMedia(part);
+                }
+            }
             content = JSON.stringify(body.data);
 
             // Determine, if trailing comma needed for next batch of data
             content =
                 content.substring(1, content.length - 1) +
-                (nextLink && actual < max ? ',' : '');
+                (nextLink ? ',' : '');
 
             await file.write(content);
-        } while (nextLink && actual < max);
+        } while (nextLink);
 
         await file.write(
             `
@@ -213,15 +255,33 @@ export default class Fetcher {
                 response.headers.get('content-type')
             ])
             .then(async ([arrayBuffer, mimeTypeHeader]) => {
+                let customMime = false;
+                let mime = MIME_TYPES[mimeTypeHeader];
+
+                if (!mime) {
+                    customMime = true;
+                    mime = '.' + mimeTypeHeader.split('/')[1];
+                }
+
                 const finalDestination =
                     global.BASEDIR +
                     '/../' +
                     originalImagesFolder +
                     contentData.id +
-                    MIME_TYPES[mimeTypeHeader];
+                    mime;
+
+                if (fs.existsSync(finalDestination)) {
+                    return;
+                }
 
                 fs.writeFileSync(finalDestination, Buffer.from(arrayBuffer));
+
+                if (customMime) {
+                    await this.sleep(1000);
+                }
             });
+
+        // await this.sleep(300);
     }
 
     async #getImages() {
@@ -233,14 +293,32 @@ export default class Fetcher {
         this.#checkAndCreateUsersImageFolder(originalImagesFolder);
 
         for (let el of data.data) {
-            if (el.media_type !== 'IMAGE') {
-                continue;
+            if (el.media_type === 'IMAGE') {
+                await this.#getAndSaveImage(el, originalImagesFolder);
             }
 
-            await this.#getAndSaveImage(el, originalImagesFolder);
+            if (el.media_type === 'CAROUSEL_ALBUM') {
+                this.#checkAndPrepareAlbumFolder(originalImagesFolder + el.id);
+
+                for (let albumEl of el.children) {
+                    await this.#getAndSaveImage(
+                        albumEl,
+                        originalImagesFolder + el.id + '/'
+                    );
+                }
+            }
         }
 
+        await this.sleep(5000);
         console.log('finished fetching images');
+    }
+
+    #checkAndPrepareAlbumFolder(albumFolderPath) {
+        if (fs.existsSync(albumFolderPath)) {
+            fs.rmdirSync(albumFolderPath);
+        }
+
+        fs.mkdirSync(albumFolderPath);
     }
 
     #checkAndCreateEditedImagesFolder(editedImagesFolder) {
@@ -249,33 +327,257 @@ export default class Fetcher {
         }
     }
 
+    #checkAndCreateEditedOriginalImagesFolder(originalImagesFolder) {
+        if (!fs.existsSync(originalImagesFolder)) {
+            fs.mkdirSync(originalImagesFolder, { recursive: true });
+        }
+    }
+
+    getTextHeight(textArray) {
+        let textHeight = 0;
+
+        textArray.forEach((text, index) => {
+            if (index === 0) {
+                textHeight +=
+                    jimp.measureTextHeight(
+                        this.#FONT,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
+            }
+
+            if (index === 1) {
+                textHeight +=
+                    jimp.measureTextHeight(
+                        this.#SMALLFONT,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
+            }
+
+            if (index > 1) {
+                textHeight +=
+                    jimp.measureTextHeight(
+                        this.#FONT14PX,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    ) + this.#SAME_TEXT_PARAGRAPH_PADDING;
+            }
+        });
+
+        return textHeight;
+    }
+
+    #getTextArrayWhichFits(textArray) {
+        const newTextArray = [];
+        let textHeight = 0;
+
+        for (const [index, text] of textArray.entries()) {
+            if (index === 0) {
+                newTextArray.push(text);
+                textHeight +=
+                    jimp.measureTextHeight(
+                        this.#FONT,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
+                    continue
+            }
+
+            if (index === 1) {
+                newTextArray.push(text);
+                textHeight +=
+                    jimp.measureTextHeight(
+                        this.#SMALLFONT,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
+                    continue
+            }
+
+            if (index > 1) {
+                const addition =
+                    jimp.measureTextHeight(
+                        this.#FONT14PX,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    ) + this.#SAME_TEXT_PARAGRAPH_PADDING;
+
+                if (
+                    addition + textHeight >=
+                    this.#TOTAL_MAX_HEIGHT - this.#MAX_IMAGE_HEIGHT
+                ) {
+                    newTextArray[index - 1] += '...';
+                    break;
+                }
+
+                textHeight += addition;
+                newTextArray.push(text);
+            }
+        }
+
+        return newTextArray;
+    }
+
+    async #editImage(
+        imageWidth,
+        imageHeight,
+        textArray,
+        saveImagePath,
+        originalImagePath
+    ) {
+        if (fs.existsSync(saveImagePath)) {
+            console.log('File exists', saveImagePath);
+            return;
+        }
+
+        const backgroundImage = await this.#generateImage(
+            this.#COLORS.WHITE,
+            imageWidth,
+            imageHeight
+        );
+
+        // Load the image
+        const blurredImage = await jimp.read(originalImagePath);
+        const image = await jimp.read(originalImagePath);
+        const initialImageWidth = image._exif.imageSize.width;
+        const initialImageHeight = image._exif.imageSize.height;
+
+        // Has to be loaded for every image separatelly new instance
+        const borderRadiusMask = await jimp.read(
+            global.BASEDIR + '/../mask-border-radius.jpg'
+        );
+
+        // Adjust image dimensions
+        image.contain(
+            this.#MAX_IMAGE_WIDTH,
+            this.#MAX_IMAGE_HEIGHT,
+            jimp.HORIZONTAL_ALIGN_CENTER | jimp.VERTICAL_ALIGN_MIDDLE
+        );
+
+        // Create blurry image with rounded corners
+        blurredImage
+            .gaussian(4)
+            .cover(
+                this.#MAX_IMAGE_WIDTH,
+                this.#MAX_IMAGE_HEIGHT,
+                jimp.VERTICAL_ALIGN_MIDDLE | jimp.HORIZONTAL_ALIGN_CENTER
+            )
+            .mask(borderRadiusMask, 0, 0);
+
+        // Resize radius mask to adjusted image
+        if (initialImageHeight >= initialImageWidth) {
+            const newWidth =
+                (this.#MAX_IMAGE_HEIGHT / initialImageHeight) *
+                initialImageWidth;
+
+            borderRadiusMask.resize(newWidth, this.#MAX_IMAGE_HEIGHT);
+            image.mask(
+                borderRadiusMask,
+                (this.#MAX_IMAGE_WIDTH - newWidth) / 2,
+                0
+            );
+        } else {
+            const newHeight =
+                (this.#MAX_IMAGE_WIDTH / initialImageWidth) *
+                initialImageHeight;
+
+            borderRadiusMask.resize(this.#MAX_IMAGE_WIDTH, newHeight);
+            image.mask(
+                borderRadiusMask,
+                0,
+                (this.#MAX_IMAGE_HEIGHT - newHeight) / 2
+            );
+        }
+
+        // Print text
+        let lineY = this.#MAX_IMAGE_HEIGHT + this.#IMAGE_PADDING_BOTTOM;
+
+        if(textArray){
+            textArray.forEach((text, index) => {
+                if (index === 0) {
+                    backgroundImage.print(
+                        this.#FONT,
+                        this.#TEXT_WIDTH,
+                        lineY,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    );
+                    lineY +=
+                        jimp.measureTextHeight(
+                            this.#FONT,
+                            text,
+                            this.#TEXT_MAX_WIDTH
+                        ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
+                }
+    
+                if (index === 1) {
+                    backgroundImage.print(
+                        this.#SMALLFONT,
+                        this.#TEXT_WIDTH,
+                        lineY,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    );
+                    lineY +=
+                        jimp.measureTextHeight(
+                            this.#SMALLFONT,
+                            text,
+                            this.#TEXT_MAX_WIDTH
+                        ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
+                }
+    
+                if (index > 1) {
+                    backgroundImage.print(
+                        this.#FONT14PX,
+                        this.#TEXT_WIDTH,
+                        lineY + this.#LINE_HEIGHT_PADDING,
+                        text,
+                        this.#TEXT_MAX_WIDTH
+                    );
+                    lineY +=
+                        jimp.measureTextHeight(
+                            this.#FONT14PX,
+                            text,
+                            this.#TEXT_MAX_WIDTH
+                        ) + this.#SAME_TEXT_PARAGRAPH_PADDING;
+                }
+            });
+        }else{
+            console.log('Textarray undefined', textArray, saveImagePath);
+        }
+
+
+        // Apply blurred image only if visible on c
+        if (initialImageHeight / initialImageWidth === 0.75) {
+            backgroundImage
+                .blit(image, this.#BG_PADDING_LEFT, this.#BG_PADDING_TOP)
+                .write(saveImagePath);
+
+            return;
+        }
+
+        backgroundImage
+            .blit(blurredImage, this.#BG_PADDING_LEFT, this.#BG_PADDING_TOP)
+            .blit(image, this.#BG_PADDING_LEFT, this.#BG_PADDING_TOP)
+            .write(saveImagePath);
+    }
+
     async #editImages() {
         const file = fs.readFileSync(this.#getUsersJSONDataPath());
         const data = JSON.parse(file);
 
         const editedImagesFolder = this.#getUsersEditedPath();
+        const editedOrigImagesFolder = this.#getUsersOriginalEditedPath();
         const originalImagesFolder = this.#getUsersImagesPath();
 
-        const WHITE_COLOR = 0xffffffff;
-        const images = fs.readdirSync(originalImagesFolder);
-
         this.#checkAndCreateEditedImagesFolder(editedImagesFolder);
+        this.#checkAndCreateEditedOriginalImagesFolder(editedOrigImagesFolder);
 
-        console.log('everything loaded');
-
-        const font = await jimp.loadFont(FONT_SANS_SERIF_16_PX);
-        const font14px = await jimp.loadFont(FONT_SANS_SERIF_14_PX);
-        const smallFont = await jimp.loadFont(jimp.FONT_SANS_10_BLACK);
-
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < data.total; i++) {
             const imageData = data.data[i];
 
-            console.log('image', imageData);
-
-            if (imageData.media_type !== 'IMAGE') {
-                continue;
-            }
-
+            // Get final text printed
             let textArray = [
                 data.username,
                 'Posted: ' +
@@ -285,189 +587,130 @@ export default class Fetcher {
                         second: '2-digit'
                     }),
                 ...(imageData.caption?.split('\n') ?? [''])
-            ];
+            ].filter((text) => text !== '.');
 
-            textArray = textArray.filter((text) => text !== '.');
+            const requiredHeight =
+                this.#BG_PADDING_TOP +
+                this.#MAX_IMAGE_HEIGHT +
+                this.#IMAGE_PADDING_BOTTOM +
+                this.getTextHeight(textArray) +
+                this.#BG_PADDING_BOTTOM;
 
-            console.log('Image index: ', imageData.id);
+            if (imageData.media_type === 'IMAGE') {
+                console.log('Image ID: ', imageData.id);
 
-            // Dimensions of image, that is used for final printing
-            const TOTAL_MAX_WIDTH = 375;
-            const TOTAL_MAX_HEIGHT = 500;
-
-            const BG_PADDING_TOP = 10;
-            const BG_PADDING_BOTTOM = 10;
-            const BG_PADDING_LEFT = 10;
-            const BG_PADDING_RIGHT = 10;
-
-            const MAX_IMAGE_HEIGHT = 276 - BG_PADDING_TOP;
-            const MAX_IMAGE_WIDTH =
-                TOTAL_MAX_WIDTH - BG_PADDING_LEFT - BG_PADDING_RIGHT;
-
-            const IMAGE_PADDING_BOTTOM = 30;
-
-            const TEXT_DIFF_PARAGRAPH_PADDING = 10;
-            const TEXT_WIDTH = 15;
-            const TEXT_MAX_WIDTH = MAX_IMAGE_WIDTH - TEXT_WIDTH;
-
-            const sameTextParagraphPadding = 6;
-            const lineHeightPadding = 2;
-            let textHeight = 0;
-
-            textArray.forEach((text, index) => {
-                if (index === 0) {
-                    textHeight +=
-                        jimp.measureTextHeight(font, text, TEXT_MAX_WIDTH) +
-                        TEXT_DIFF_PARAGRAPH_PADDING;
-                }
-
-                if (index === 1) {
-                    textHeight +=
-                        jimp.measureTextHeight(
-                            smallFont,
-                            text,
-                            TEXT_MAX_WIDTH
-                        ) + TEXT_DIFF_PARAGRAPH_PADDING;
-                }
-
-                if (index > 1) {
-                    textHeight +=
-                        jimp.measureTextHeight(font14px, text, TEXT_MAX_WIDTH) +
-                        sameTextParagraphPadding;
-                }
-            });
-
-            const REQUIRED_HEIGHT =
-                BG_PADDING_TOP +
-                MAX_IMAGE_HEIGHT +
-                IMAGE_PADDING_BOTTOM +
-                textHeight +
-                BG_PADDING_BOTTOM;
-
-            const backgroundImage =
-                TOTAL_MAX_HEIGHT - REQUIRED_HEIGHT <= 0
-                    ? await this.#generateImage(
-                          WHITE_COLOR,
-                          MAX_IMAGE_WIDTH + BG_PADDING_LEFT + BG_PADDING_RIGHT,
-                          REQUIRED_HEIGHT
-                      )
-                    : await this.#generateImage(WHITE_COLOR, 375, 500);
-
-            const image = await jimp.read(
-                originalImagesFolder + imageData.id + '.jpg'
-            );
-            const initialImageWidth = image._exif.imageSize.width;
-            const initialImageHeight = image._exif.imageSize.height;
-
-            const blurredImage = await jimp.read(
-                originalImagesFolder + imageData.id + '.jpg'
-            );
-            const borderRadiusMask = await jimp.read(
-                global.BASEDIR + '/../mask-border-radius.jpg'
-            );
-
-            image.contain(
-                MAX_IMAGE_WIDTH,
-                MAX_IMAGE_HEIGHT,
-                jimp.HORIZONTAL_ALIGN_CENTER | jimp.VERTICAL_ALIGN_MIDDLE
-            );
-
-            blurredImage
-                .gaussian(4)
-                .cover(
-                    MAX_IMAGE_WIDTH,
-                    MAX_IMAGE_HEIGHT,
-                    jimp.VERTICAL_ALIGN_MIDDLE | jimp.HORIZONTAL_ALIGN_CENTER
-                )
-                .mask(borderRadiusMask, 0, 0);
-
-            if (initialImageHeight >= initialImageWidth) {
-                const newWidth =
-                    (MAX_IMAGE_HEIGHT / initialImageHeight) * initialImageWidth;
-
-                borderRadiusMask.resize(newWidth, MAX_IMAGE_HEIGHT);
-                image.mask(
-                    borderRadiusMask,
-                    (MAX_IMAGE_WIDTH - newWidth) / 2,
-                    0
+                await this.decideIfAlsoCreateOriginal(
+                    requiredHeight,
+                    textArray,
+                    editedOrigImagesFolder + imageData.id + '.jpg',
+                    editedImagesFolder + imageData.id + '.jpg',
+                    originalImagesFolder + imageData.id + '.jpg'
                 );
-            } else {
-                const newHeight =
-                    (MAX_IMAGE_WIDTH / initialImageWidth) * initialImageHeight;
-
-                borderRadiusMask.resize(MAX_IMAGE_WIDTH, newHeight);
-                image.mask(
-                    borderRadiusMask,
-                    0,
-                    (MAX_IMAGE_HEIGHT - newHeight) / 2
-                );
-            }
-
-            let lineY = MAX_IMAGE_HEIGHT + IMAGE_PADDING_BOTTOM;
-
-            textArray.forEach((text, index) => {
-                if (index === 0) {
-                    backgroundImage.print(
-                        font,
-                        TEXT_WIDTH,
-                        lineY,
-                        text,
-                        TEXT_MAX_WIDTH
-                    );
-                    lineY +=
-                        jimp.measureTextHeight(font, text, TEXT_MAX_WIDTH) +
-                        TEXT_DIFF_PARAGRAPH_PADDING;
-                }
-
-                if (index === 1) {
-                    backgroundImage.print(
-                        smallFont,
-                        TEXT_WIDTH,
-                        lineY,
-                        text,
-                        TEXT_MAX_WIDTH
-                    );
-                    lineY +=
-                        jimp.measureTextHeight(
-                            smallFont,
-                            text,
-                            TEXT_MAX_WIDTH
-                        ) + TEXT_DIFF_PARAGRAPH_PADDING;
-                }
-
-                if (index > 1) {
-                    backgroundImage.print(
-                        font14px,
-                        TEXT_WIDTH,
-                        lineY + lineHeightPadding,
-                        text,
-                        TEXT_MAX_WIDTH
-                    );
-                    lineY +=
-                        jimp.measureTextHeight(font14px, text, TEXT_MAX_WIDTH) +
-                        sameTextParagraphPadding;
-                }
-            });
-
-            if (initialImageHeight / initialImageWidth === 0.75) {
-                console.log('without blurred background');
-                backgroundImage
-                    .blit(image, 10, 10)
-                    .write(editedImagesFolder + images[i]);
-
                 continue;
             }
 
-            backgroundImage
-                .blit(blurredImage, 10, 10)
-                .blit(image, 10, 10)
-                .write(editedImagesFolder + images[i]);
+            if (imageData.media_type === 'CAROUSEL_ALBUM') {
+                console.log('Album ID: ', imageData.id);
+
+                for (let [index, albumEl] of imageData.children.entries()) {
+                    if (albumEl.media_type === 'VIDEO') {
+                        continue;
+                    }
+
+                    console.log('Sub-image ID: ', albumEl.id);
+
+                    const arrayCopy = [...textArray];
+                    arrayCopy[1] += ` (${index + 1})`;
+
+                    const imageName = `${imageData.id}-${index + 1}.jpg`;
+
+                    // first image with content
+                    if (index === 0) {
+                        await this.decideIfAlsoCreateOriginal(
+                            requiredHeight,
+                            arrayCopy,
+                            editedOrigImagesFolder + imageName,
+                            editedImagesFolder + imageName,
+                            originalImagesFolder +
+                                imageData.id +
+                                '/' +
+                                albumEl.id +
+                                '.jpg'
+                        );
+
+                        continue;
+                    }
+
+                    await this.decideIfAlsoCreateOriginal(
+                        requiredHeight,
+                        arrayCopy.slice(0, 2),
+                        editedOrigImagesFolder + imageName,
+                        editedImagesFolder + imageName,
+                        originalImagesFolder +
+                            imageData.id +
+                            '/' +
+                            albumEl.id +
+                            '.jpg'
+                    );
+
+                    continue;
+                }
+            }
         }
+
+        await this.sleep(2000);
+    }
+
+    async decideIfAlsoCreateOriginal(
+        requiredHeight,
+        textArray,
+        editedOriginalPath,
+        editedImagePath,
+        originalImagePath
+    ) {
+        const overflowsImage = this.#TOTAL_MAX_HEIGHT - requiredHeight <= 0;
+
+        if (overflowsImage && textArray.length > 2) {
+            const width =
+                this.#MAX_IMAGE_WIDTH +
+                this.#BG_PADDING_LEFT +
+                this.#BG_PADDING_RIGHT;
+
+            // Create original
+            await this.#editImage(
+                width,
+                requiredHeight,
+                textArray,
+                editedOriginalPath,
+                originalImagePath
+            );
+        }
+
+        // Create cropped
+        await this.#editImage(
+            this.#TOTAL_MAX_WIDTH,
+            this.#TOTAL_MAX_HEIGHT,
+            overflowsImage ? this.#getTextArrayWhichFits(textArray) : textArray,
+            editedImagePath,
+            originalImagePath
+        );
+    }
+
+    async sleep(timeMs) {
+        console.log('sleeping');
+        return new Promise((resolve) =>
+            setTimeout(() => {
+                console.log('end-sleeping');
+                resolve();
+            }, timeMs)
+        );
     }
 
     async start() {
         await this.#fetchUserData();
         await this.#getImages();
         await this.#editImages();
+
+        await this.sleep(1000);
     }
 }

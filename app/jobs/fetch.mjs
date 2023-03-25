@@ -2,7 +2,7 @@ import '../bootstrap.mjs';
 import Fetcher from '../classes/Fetcher.mjs';
 
 const token = process.argv[2].split('=')[1];
-const fetcher = new Fetcher(token);
+const fetcher = await Fetcher.make(token);
 
 await fetcher.start();
 
