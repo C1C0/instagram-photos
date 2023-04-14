@@ -860,7 +860,7 @@ export default class Fetcher {
     async start() {
         // await this.#fetchUserData();
         // await this.#getImages();
-        await this.#editImages('jimp');
+        await this.#editImages('sharp');
 
         await this.sleep(1000);
     }
