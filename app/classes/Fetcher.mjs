@@ -1,5 +1,6 @@
 import fs from 'fs';
 import jimp from 'jimp';
+import sharp from 'sharp';
 
 export const MIME_TYPES = {
     'image/jpeg': '.jpg',
@@ -20,7 +21,7 @@ export default class Fetcher {
     /**
      * @type {string | null}
      */
-    #username = null;
+    #username = 'mzauskova';
 
     #mediaFields = ['id', 'caption', 'media_url', 'media_type', 'timestamp'];
     #userFields = ['id', 'username'];
@@ -34,7 +35,9 @@ export default class Fetcher {
     #BG_PADDING_LEFT = 10;
     #BG_PADDING_RIGHT = 10;
 
-    #MAX_IMAGE_HEIGHT = 276 - this.#BG_PADDING_TOP;
+    #MAX_TEXT_HEIGHT = 276;
+
+    #MAX_IMAGE_HEIGHT = this.#MAX_TEXT_HEIGHT - this.#BG_PADDING_TOP;
     #MAX_IMAGE_WIDTH =
         this.#TOTAL_MAX_WIDTH - this.#BG_PADDING_LEFT - this.#BG_PADDING_RIGHT;
 
@@ -381,7 +384,7 @@ export default class Fetcher {
                         text,
                         this.#TEXT_MAX_WIDTH
                     ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
-                    continue
+                continue;
             }
 
             if (index === 1) {
@@ -392,7 +395,7 @@ export default class Fetcher {
                         text,
                         this.#TEXT_MAX_WIDTH
                     ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
-                    continue
+                continue;
             }
 
             if (index > 1) {
@@ -493,7 +496,7 @@ export default class Fetcher {
         // Print text
         let lineY = this.#MAX_IMAGE_HEIGHT + this.#IMAGE_PADDING_BOTTOM;
 
-        if(textArray){
+        if (textArray) {
             textArray.forEach((text, index) => {
                 if (index === 0) {
                     backgroundImage.print(
@@ -510,7 +513,7 @@ export default class Fetcher {
                             this.#TEXT_MAX_WIDTH
                         ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
                 }
-    
+
                 if (index === 1) {
                     backgroundImage.print(
                         this.#SMALLFONT,
@@ -526,7 +529,7 @@ export default class Fetcher {
                             this.#TEXT_MAX_WIDTH
                         ) + this.#TEXT_DIFF_PARAGRAPH_PADDING;
                 }
-    
+
                 if (index > 1) {
                     backgroundImage.print(
                         this.#FONT14PX,
@@ -543,10 +546,9 @@ export default class Fetcher {
                         ) + this.#SAME_TEXT_PARAGRAPH_PADDING;
                 }
             });
-        }else{
+        } else {
             console.log('Textarray undefined', textArray, saveImagePath);
         }
-
 
         // Apply blurred image only if visible on c
         if (initialImageHeight / initialImageWidth === 0.75) {
@@ -563,7 +565,11 @@ export default class Fetcher {
             .write(saveImagePath);
     }
 
-    async #editImagesJimp() {
+    /**
+     *
+     * @param {'jimp' | 'sharp'} editor
+     */
+    async #editImages(editor = 'jimp') {
         const file = fs.readFileSync(this.#getUsersJSONDataPath());
         const data = JSON.parse(file);
 
@@ -604,7 +610,8 @@ export default class Fetcher {
                     textArray,
                     editedOrigImagesFolder + imageData.id + '.jpg',
                     editedImagesFolder + imageData.id + '.jpg',
-                    originalImagesFolder + imageData.id + '.jpg'
+                    originalImagesFolder + imageData.id + '.jpg',
+                    editor
                 );
                 continue;
             }
@@ -635,7 +642,8 @@ export default class Fetcher {
                                 imageData.id +
                                 '/' +
                                 albumEl.id +
-                                '.jpg'
+                                '.jpg',
+                            editor
                         );
 
                         continue;
@@ -650,7 +658,8 @@ export default class Fetcher {
                             imageData.id +
                             '/' +
                             albumEl.id +
-                            '.jpg'
+                            '.jpg',
+                        editor
                     );
 
                     continue;
@@ -661,12 +670,22 @@ export default class Fetcher {
         await this.sleep(2000);
     }
 
+    /**
+     *
+     * @param {*} requiredHeight
+     * @param {*} textArray
+     * @param {*} editedOriginalPath
+     * @param {*} editedImagePath
+     * @param {*} originalImagePath
+     * @param {'jimp' | 'sharp'} editor
+     */
     async decideIfAlsoCreateOriginal(
         requiredHeight,
         textArray,
         editedOriginalPath,
         editedImagePath,
-        originalImagePath
+        originalImagePath,
+        editor = 'jimp'
     ) {
         const overflowsImage = this.#TOTAL_MAX_HEIGHT - requiredHeight <= 0;
 
@@ -677,23 +696,155 @@ export default class Fetcher {
                 this.#BG_PADDING_RIGHT;
 
             // Create original
+            if (editor === 'jimp') {
+                await this.#editImageJimp(
+                    this.#TOTAL_MAX_WIDTH,
+                    requiredHeight,
+                    textArray,
+                    editedOriginalPath,
+                    originalImagePath
+                );
+            }
+
+            if (editor === 'sharp') {
+                await this.#editImageSharp(
+                    width,
+                    requiredHeight,
+                    textArray,
+                    editedOriginalPath,
+                    originalImagePath
+                );
+            }
+        }
+
+        // Create cropped
+        if (editor === 'jimp') {
             await this.#editImageJimp(
-                width,
-                requiredHeight,
-                textArray,
-                editedOriginalPath,
+                this.#TOTAL_MAX_WIDTH,
+                this.#TOTAL_MAX_HEIGHT,
+                overflowsImage
+                    ? this.#getTextArrayWhichFits(textArray)
+                    : textArray,
+                editedImagePath,
                 originalImagePath
             );
         }
 
-        // Create cropped
-        await this.#editImageJimp(
-            this.#TOTAL_MAX_WIDTH,
-            this.#TOTAL_MAX_HEIGHT,
-            overflowsImage ? this.#getTextArrayWhichFits(textArray) : textArray,
-            editedImagePath,
-            originalImagePath
+        if (editor === 'sharp') {
+            await this.#editImageSharp(
+                this.#TOTAL_MAX_WIDTH,
+                this.#TOTAL_MAX_HEIGHT,
+                overflowsImage
+                    ? this.#getTextArrayWhichFits(textArray)
+                    : textArray,
+                editedImagePath,
+                originalImagePath
+            );
+        }
+    }
+
+    async #editImageSharp(
+        imageWidth,
+        imageHeight,
+        textArray,
+        saveImagePath,
+        originalImagePath
+    ) {
+        if (fs.existsSync(saveImagePath)) {
+            console.log('File exists', saveImagePath);
+            return;
+        }
+
+        const borderRadiusOverlay = Buffer.from(
+            `<svg><rect x="0" y="0" width="${this.#MAX_IMAGE_WIDTH}" height="${
+                this.#MAX_IMAGE_HEIGHT
+            }" rx="50" ry="50"/></svg>`
         );
+
+        const backgroundImage = await sharp({
+            create: {
+                width: imageWidth,
+                height: imageHeight,
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 255 }
+            }
+        })
+            .jpeg()
+            .toBuffer();
+
+        const curviture = 10;
+        const borderOnBlurredImage = Buffer.from(
+            `<svg><rect x="0" y="0" width="${this.#MAX_IMAGE_WIDTH}" height="${
+                this.#MAX_IMAGE_HEIGHT
+            }" rx="${curviture}" ry="${curviture}"/></svg>`
+        );
+
+        console.log('Preparing image');
+
+        const image = await sharp(originalImagePath)
+            .resize({
+                width: this.#MAX_IMAGE_WIDTH,
+                height: this.#MAX_IMAGE_HEIGHT,
+                fit: 'contain',
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            })
+            .png()
+            .toBuffer();
+
+        console.log('image fine');
+
+        const blurredImage = await sharp(originalImagePath)
+            .resize({
+                width: this.#MAX_IMAGE_WIDTH,
+                height: this.#MAX_IMAGE_HEIGHT,
+                fit: 'cover'
+            })
+            .composite([{ input: borderOnBlurredImage, blend: 'dest-in' }])
+            .blur(4)
+            .png()
+            .toBuffer();
+
+        console.log(image, blurredImage);
+
+        const fontSize = 14;
+        const lineHeight = fontSize * 1.5;
+
+        const textLinesSVG = textArray
+            .map((line, index) => `<tspan x="0" dy="15">${line}</tspan>`)
+            .join('');
+
+        // Create SVG with text
+        const text = Buffer.from(`
+    <svg width="${this.#MAX_IMAGE_WIDTH - this.#BG_PADDING_RIGHT}" height="${
+            this.#MAX_TEXT_HEIGHT
+        }">
+        <text x="0" y="0" style="width:100px;" font-size="${fontSize}">${textLinesSVG}</text>
+    </svg>
+`);
+
+        // Composite image, background, and text
+        await sharp(backgroundImage)
+            .composite([
+                {
+                    input: blurredImage,
+                    left: this.#BG_PADDING_LEFT,
+                    top: this.#BG_PADDING_TOP
+                },
+                {
+                    input: image,
+                    left: this.#BG_PADDING_LEFT,
+                    top: this.#BG_PADDING_TOP
+                },
+                {
+                    input: text,
+                    top:
+                        (await sharp(blurredImage).metadata()).height +
+                        this.#IMAGE_PADDING_BOTTOM,
+                    left: this.#BG_PADDING_LEFT
+                }
+            ])
+            .jpeg()
+            .toFile(saveImagePath);
     }
 
     async sleep(timeMs) {
@@ -709,7 +860,7 @@ export default class Fetcher {
     async start() {
         // await this.#fetchUserData();
         // await this.#getImages();
-        await this.#editImagesJimp();
+        await this.#editImages('jimp');
 
         await this.sleep(1000);
     }
