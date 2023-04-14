@@ -2,7 +2,6 @@ import fs from 'fs';
 import jimp from 'jimp';
 import sharp from 'sharp';
 
-
 class Test {
     #TOTAL_MAX_WIDTH = 375;
     #TOTAL_MAX_HEIGHT = 500;
@@ -35,6 +34,12 @@ class Test {
         WHITE: 0xffffffff
     };
 
+    /**
+     *
+     * @param {string[]} textArray
+     * @param {*} saveImagePath
+     * @param {*} originalImagePath
+     */
     async editImageSharp(textArray, saveImagePath, originalImagePath) {
         const imageWidth = this.#TOTAL_MAX_WIDTH,
             imageHeight = this.#TOTAL_MAX_HEIGHT;
@@ -95,21 +100,44 @@ class Test {
 
         console.log(image, blurredImage);
 
-        const fontSize = 14;
-        const lineHeight = fontSize * 1.5;
+        // const fontSize = 14;
+        // const lineHeight = fontSize * 1.5;
 
-        const textLinesSVG = textArray
-            .map((line, index) => `<tspan x="0" dy="15">${line}</tspan>`)
+        const textLinesMarkup = textArray
+            .map((line, index) => {
+                switch (index) {
+                    case 0:
+                        return `<span foreground="black" font="14" line_height="1.3"><b>${line + '\n'}</b></span>`;
+                    case 1:
+                        return `<span foreground="black" font="11" line_height="2.3"><i>${line + '\n'}</i></span>`;
+                    default:
+                        return `<span foreground="black" font="14">${line}</span>`;
+                }
+            })
             .join('');
 
         // Create SVG with text
-        const text = Buffer.from(`
-    <svg width="${this.#MAX_IMAGE_WIDTH - this.#BG_PADDING_RIGHT}" height="${
-            this.#MAX_TEXT_HEIGHT
-        }">
-        <text x="0" y="0" style="width:100px;" font-size="${fontSize}">${textLinesSVG}</text>
-    </svg>
-    `);
+        //     const text = Buffer.from(`
+        // <svg width="${this.#MAX_IMAGE_WIDTH - this.#BG_PADDING_RIGHT}" height="${
+        //         this.#MAX_TEXT_HEIGHT
+        //     }">
+        //     <text x="0" y="0" style="width:100px;" font-size="${fontSize}">${textLinesSVG}</text>
+        // </svg>
+        // `);
+
+        let text = await sharp({
+            text: {
+                text: textLinesMarkup,
+                font: 'Arial',
+                rgba: true,
+                wrap: 'char',
+                width: this.#MAX_IMAGE_WIDTH
+            }
+        }).png();
+
+        const textFile = await text.toFile('./testText.png');
+
+        text = await text.toBuffer();
 
         // Composite image, background, and text
         await sharp(backgroundImage)
@@ -137,7 +165,7 @@ class Test {
     }
 }
 
-(async function(){
+(async function () {
     console.log('Starting test');
 
     const x = new Test();
@@ -145,12 +173,15 @@ class Test {
     // TODO: Multiline
     // TODO: Different fonts
 
-    await x.editImageSharp([
-        'cico.__',
-        'today',
-        'Nepozeraj sa na všetko tak čiernobielo . . . .\n.\n.\n.\n#deepmind #blackAndWhiteIsNotAlwaysRight #WouldntItBeEasierPutTitanfallToF2P #respawnentertainment 🙂'
-    ], './testResult.jpg', './users-data/cico__/images/17867217443104388.jpg');
-    
+    await x.editImageSharp(
+        [
+            'cico.__',
+            'today',
+            'Nepozeraj sa na všetko tak čiernobielo . . . .\n.\n.\n.\n#deepmind #blackAndWhiteIsNotAlwaysRight #WouldntItBeEasierPutTitanfallToF2P #respawnentertainment 🙂'
+        ],
+        './testResult.jpg',
+        './users-data/cico__/images/17867217443104388.jpg'
+    );
 
     console.log('Ending test');
-})()
+})();
