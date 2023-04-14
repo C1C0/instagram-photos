@@ -21,7 +21,7 @@ export default class Fetcher {
     /**
      * @type {string | null}
      */
-    #username = 'mzauskova';
+    #username = 'cico.__';
 
     #mediaFields = ['id', 'caption', 'media_url', 'media_type', 'timestamp'];
     #userFields = ['id', 'username'];
@@ -755,16 +755,53 @@ export default class Fetcher {
             return;
         }
 
-        const borderRadiusOverlay = Buffer.from(
-            `<svg><rect x="0" y="0" width="${this.#MAX_IMAGE_WIDTH}" height="${
-                this.#MAX_IMAGE_HEIGHT
-            }" rx="50" ry="50"/></svg>`
-        );
+        const textLinesMarkup = textArray
+            .map((line, index) => {
+                switch (index) {
+                    case 0:
+                        return `<span foreground="black" font="14" line_height="1.3"><b>${
+                            line + '\n'
+                        }</b></span>`;
+                    case 1:
+                        return `<span foreground="black" font="11" line_height="2.3"><i>${
+                            line + '\n'
+                        }</i></span>`;
+                    default:
+                        return `<span foreground="black" font="13">${this.checkBadCharacters(line)}</span>`;
+                }
+            })
+            .join('');
+
+        const text = await sharp({
+            text: {
+                text: textLinesMarkup,
+                font: 'Arial',
+                fontfile:
+                    global.BASEDIR + '/assets/fonts/NotoColorEmoji-Regular.ttf',
+                rgba: true,
+                width: this.#MAX_IMAGE_WIDTH,
+                wrap: 'char'
+            }
+        })
+            .png()
+            .toBuffer();
+
+        const textMetadata = await sharp(text).metadata();
+
+        let textOverflowingValue =
+            textMetadata.height -
+            (imageHeight -
+                this.#MAX_TEXT_HEIGHT -
+                this.#BG_PADDING_TOP -
+                this.#BG_PADDING_BOTTOM);
 
         const backgroundImage = await sharp({
             create: {
                 width: imageWidth,
-                height: imageHeight,
+                height:
+                    textOverflowingValue > 0
+                        ? textOverflowingValue + imageHeight
+                        : imageHeight,
                 channels: 4,
                 background: { r: 255, g: 255, b: 255, alpha: 255 }
             }
@@ -805,22 +842,7 @@ export default class Fetcher {
             .toBuffer();
 
         console.log(image, blurredImage);
-
-        const fontSize = 14;
-        const lineHeight = fontSize * 1.5;
-
-        const textLinesSVG = textArray
-            .map((line, index) => `<tspan x="0" dy="15">${line}</tspan>`)
-            .join('');
-
-        // Create SVG with text
-        const text = Buffer.from(`
-    <svg width="${this.#MAX_IMAGE_WIDTH - this.#BG_PADDING_RIGHT}" height="${
-            this.#MAX_TEXT_HEIGHT
-        }">
-        <text x="0" y="0" style="width:100px;" font-size="${fontSize}">${textLinesSVG}</text>
-    </svg>
-`);
+        console.log(textOverflowingValue, textMetadata, this.#MAX_IMAGE_WIDTH);
 
         // Composite image, background, and text
         await sharp(backgroundImage)
@@ -845,6 +867,23 @@ export default class Fetcher {
             ])
             .jpeg()
             .toFile(saveImagePath);
+    }
+
+    /**
+     * 
+     * @param {string} text 
+     */
+    checkBadCharacters(text){
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#x27;',
+            "/": '&#x2F;',
+        };
+        const reg = /[&<>"'/]/ig;
+        return text.replace(reg, (match)=>(map[match]));
     }
 
     async sleep(timeMs) {
