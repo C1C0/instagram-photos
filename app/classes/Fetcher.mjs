@@ -21,23 +21,24 @@ export default class Fetcher {
     /**
      * @type {string | null}
      */
-    #username = 'mzauskova';
+    #username = null;
 
     #mediaFields = ['id', 'caption', 'media_url', 'media_type', 'timestamp'];
     #userFields = ['id', 'username'];
 
     // Dimensions of image, that is used for final printing
-    #TOTAL_MAX_WIDTH = 375;
-    #TOTAL_MAX_HEIGHT = 500;
+    #TOTAL_MAX_WIDTH = 750;
+    #TOTAL_MAX_HEIGHT = 1000;
 
     #BG_PADDING_TOP = 10;
     #BG_PADDING_BOTTOM = 10;
     #BG_PADDING_LEFT = 10;
     #BG_PADDING_RIGHT = 10;
 
-    #MAX_TEXT_HEIGHT = 276;
+    #MAX_TEXT_HEIGHT = 500;
 
-    #MAX_IMAGE_HEIGHT = this.#MAX_TEXT_HEIGHT - this.#BG_PADDING_TOP;
+    #MAX_IMAGE_HEIGHT =
+        this.#TOTAL_MAX_HEIGHT - this.#MAX_TEXT_HEIGHT - this.#BG_PADDING_TOP;
     #MAX_IMAGE_WIDTH =
         this.#TOTAL_MAX_WIDTH - this.#BG_PADDING_LEFT - this.#BG_PADDING_RIGHT;
 
@@ -687,28 +688,27 @@ export default class Fetcher {
         originalImagePath,
         editor = 'jimp'
     ) {
+        if (editor === 'sharp') {
+            // when Sharp used, this decision is automatically handled inside
+            await this.#editImageSharp(
+                this.#TOTAL_MAX_WIDTH,
+                this.#TOTAL_MAX_HEIGHT,
+                textArray,
+                editedImagePath,
+                editedOriginalPath,
+                originalImagePath
+            );
+
+            return;
+        }
+
         const overflowsImage = this.#TOTAL_MAX_HEIGHT - requiredHeight <= 0;
 
         if (overflowsImage && textArray.length > 2) {
-            const width =
-                this.#MAX_IMAGE_WIDTH +
-                this.#BG_PADDING_LEFT +
-                this.#BG_PADDING_RIGHT;
-
             // Create original
             if (editor === 'jimp') {
                 await this.#editImageJimp(
                     this.#TOTAL_MAX_WIDTH,
-                    requiredHeight,
-                    textArray,
-                    editedOriginalPath,
-                    originalImagePath
-                );
-            }
-
-            if (editor === 'sharp') {
-                await this.#editImageSharp(
-                    width,
                     requiredHeight,
                     textArray,
                     editedOriginalPath,
@@ -729,18 +729,6 @@ export default class Fetcher {
                 originalImagePath
             );
         }
-
-        if (editor === 'sharp') {
-            await this.#editImageSharp(
-                this.#TOTAL_MAX_WIDTH,
-                this.#TOTAL_MAX_HEIGHT,
-                overflowsImage
-                    ? this.#getTextArrayWhichFits(textArray)
-                    : textArray,
-                editedImagePath,
-                originalImagePath
-            );
-        }
     }
 
     async #editImageSharp(
@@ -748,6 +736,7 @@ export default class Fetcher {
         imageHeight,
         textArray,
         saveImagePath,
+        saveImagePathNonCropped,
         originalImagePath
     ) {
         if (fs.existsSync(saveImagePath)) {
@@ -755,96 +744,159 @@ export default class Fetcher {
             return;
         }
 
-        const borderRadiusOverlay = Buffer.from(
-            `<svg><rect x="0" y="0" width="${this.#MAX_IMAGE_WIDTH}" height="${
-                this.#MAX_IMAGE_HEIGHT
-            }" rx="50" ry="50"/></svg>`
-        );
-
-        const backgroundImage = await sharp({
-            create: {
-                width: imageWidth,
-                height: imageHeight,
-                channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 255 }
-            }
-        })
-            .jpeg()
-            .toBuffer();
-
-        const curviture = 10;
-        const borderOnBlurredImage = Buffer.from(
-            `<svg><rect x="0" y="0" width="${this.#MAX_IMAGE_WIDTH}" height="${
-                this.#MAX_IMAGE_HEIGHT
-            }" rx="${curviture}" ry="${curviture}"/></svg>`
-        );
-
-        console.log('Preparing image');
-
-        const image = await sharp(originalImagePath)
-            .resize({
-                width: this.#MAX_IMAGE_WIDTH,
-                height: this.#MAX_IMAGE_HEIGHT,
-                fit: 'contain',
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
+        const textLinesMarkup = textArray
+            .map((line, index) => {
+                switch (index) {
+                    case 0:
+                        return `<span foreground="black" font="14" line_height="1.3"><b>${
+                            line + '\n'
+                        }</b></span>`;
+                    case 1:
+                        return `<span foreground="black" font="11" line_height="2.3"><i>${
+                            line + '\n'
+                        }</i></span>`;
+                    default:
+                        return `<span foreground="black" font="13" line_height="1.15">${this.checkBadCharacters(
+                            line
+                        )}</span>`;
+                }
             })
-            .png()
-            .toBuffer();
-
-        console.log('image fine');
-
-        const blurredImage = await sharp(originalImagePath)
-            .resize({
-                width: this.#MAX_IMAGE_WIDTH,
-                height: this.#MAX_IMAGE_HEIGHT,
-                fit: 'cover'
-            })
-            .composite([{ input: borderOnBlurredImage, blend: 'dest-in' }])
-            .blur(4)
-            .png()
-            .toBuffer();
-
-        console.log(image, blurredImage);
-
-        const fontSize = 14;
-        const lineHeight = fontSize * 1.5;
-
-        const textLinesSVG = textArray
-            .map((line, index) => `<tspan x="0" dy="15">${line}</tspan>`)
             .join('');
 
-        // Create SVG with text
-        const text = Buffer.from(`
-    <svg width="${this.#MAX_IMAGE_WIDTH - this.#BG_PADDING_RIGHT}" height="${
-            this.#MAX_TEXT_HEIGHT
-        }">
-        <text x="0" y="0" style="width:100px;" font-size="${fontSize}">${textLinesSVG}</text>
-    </svg>
-`);
+        const text = await sharp({
+            text: {
+                text: textLinesMarkup,
+                font: 'Arial',
+                fontfile:
+                    global.BASEDIR + '/assets/fonts/NotoColorEmoji-Regular.ttf',
+                rgba: true,
+                width: this.#MAX_IMAGE_WIDTH,
+                dpi: 124,
+                wrap: 'char'
+            }
+        })
+            .png()
+            .toBuffer();
 
-        // Composite image, background, and text
-        await sharp(backgroundImage)
-            .composite([
-                {
-                    input: blurredImage,
-                    left: this.#BG_PADDING_LEFT,
-                    top: this.#BG_PADDING_TOP
-                },
-                {
-                    input: image,
-                    left: this.#BG_PADDING_LEFT,
-                    top: this.#BG_PADDING_TOP
-                },
-                {
-                    input: text,
-                    top:
-                        (await sharp(blurredImage).metadata()).height +
-                        this.#IMAGE_PADDING_BOTTOM,
-                    left: this.#BG_PADDING_LEFT
-                }
-            ])
-            .jpeg()
-            .toFile(saveImagePath);
+        const textMetadata = await sharp(text).metadata();
+
+        let textOverflowingValue = textMetadata.height - this.#MAX_TEXT_HEIGHT;
+
+        const imagesWithSavePath = [
+            {
+                backgroundImage: await sharp({
+                    create: {
+                        width: imageWidth,
+                        height: imageHeight,
+                        channels: 4,
+                        background: { r: 255, g: 255, b: 255, alpha: 255 }
+                    }
+                })
+                    .jpeg()
+                    .toBuffer(),
+                savePath: saveImagePath
+            }
+        ];
+
+        // here we create edited image with whole content
+        if (textOverflowingValue > 0) {
+            imagesWithSavePath.push({
+                backgroundImage: await sharp({
+                    create: {
+                        width: imageWidth,
+                        height:
+                            textOverflowingValue +
+                            this.#IMAGE_PADDING_BOTTOM +
+                            this.#BG_PADDING_BOTTOM +
+                            imageHeight,
+                        channels: 4,
+                        background: { r: 255, g: 255, b: 255, alpha: 255 }
+                    }
+                })
+                    .jpeg()
+                    .toBuffer(),
+                savePath: saveImagePathNonCropped
+            });
+        }
+
+        imagesWithSavePath.forEach(async (data) => {
+            const curviture = 10;
+            const borderOnBlurredImage = Buffer.from(
+                `<svg><rect x="0" y="0" width="${
+                    this.#MAX_IMAGE_WIDTH
+                }" height="${
+                    this.#MAX_IMAGE_HEIGHT
+                }" rx="${curviture}" ry="${curviture}"/></svg>`
+            );
+
+            console.log(
+                'Preparing image',
+                this.#MAX_IMAGE_WIDTH,
+                this.#MAX_IMAGE_HEIGHT
+            );
+
+            const image = await sharp(originalImagePath)
+                .resize({
+                    width: this.#MAX_IMAGE_WIDTH,
+                    height: this.#MAX_IMAGE_HEIGHT,
+                    fit: 'contain',
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                })
+                .png()
+                .toBuffer();
+
+            const blurredImage = await sharp(originalImagePath)
+                .resize({
+                    width: this.#MAX_IMAGE_WIDTH,
+                    height: this.#MAX_IMAGE_HEIGHT,
+                    fit: 'cover'
+                })
+                .composite([{ input: borderOnBlurredImage, blend: 'dest-in' }])
+                .blur(4)
+                .png()
+                .toBuffer();
+
+            // Composite image, background, and text
+            await sharp(data.backgroundImage)
+                .composite([
+                    {
+                        input: blurredImage,
+                        left: this.#BG_PADDING_LEFT,
+                        top: this.#BG_PADDING_TOP
+                    },
+                    {
+                        input: image,
+                        left: this.#BG_PADDING_LEFT,
+                        top: this.#BG_PADDING_TOP
+                    },
+                    {
+                        input: text,
+                        top:
+                            (await sharp(blurredImage).metadata()).height +
+                            this.#IMAGE_PADDING_BOTTOM,
+                        left: this.#BG_PADDING_LEFT
+                    }
+                ])
+                .jpeg()
+                .toFile(data.savePath);
+        });
+    }
+
+    /**
+     *
+     * @param {string} text
+     */
+    checkBadCharacters(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#x27;',
+            '/': '&#x2F;'
+        };
+        const reg = /[&<>"'/]/gi;
+        return text.replace(reg, (match) => map[match]);
     }
 
     async sleep(timeMs) {
@@ -858,9 +910,9 @@ export default class Fetcher {
     }
 
     async start() {
-        // await this.#fetchUserData();
-        // await this.#getImages();
-        await this.#editImages('jimp');
+        await this.#fetchUserData();
+        await this.#getImages();
+        await this.#editImages('sharp');
 
         await this.sleep(1000);
     }
