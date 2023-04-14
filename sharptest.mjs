@@ -107,18 +107,14 @@ class Test {
             })
             .join('');
 
-        let text = await sharp({
+        const text = await sharp({
             text: {
                 text: textLinesMarkup,
                 fontfile: './NotoColorEmoji-Regular.ttf',
                 rgba: true,
                 width: this.#MAX_IMAGE_WIDTH
             }
-        }).png();
-
-        const textFile = await text.toFile('./testText.png');
-
-        text = await text.toBuffer();
+        }).png().toBuffer();
 
         // Composite image, background, and text
         await sharp(backgroundImage)
