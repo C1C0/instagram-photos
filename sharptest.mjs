@@ -49,12 +49,6 @@ class Test {
             fs.unlinkSync(saveImagePath);
         }
 
-        const borderRadiusOverlay = Buffer.from(
-            `<svg><rect x="0" y="0" width="${this.#MAX_IMAGE_WIDTH}" height="${
-                this.#MAX_IMAGE_HEIGHT
-            }" rx="50" ry="50"/></svg>`
-        );
-
         const backgroundImage = await sharp({
             create: {
                 width: imageWidth,
@@ -100,9 +94,6 @@ class Test {
 
         console.log(image, blurredImage);
 
-        // const fontSize = 14;
-        // const lineHeight = fontSize * 1.5;
-
         const textLinesMarkup = textArray
             .map((line, index) => {
                 switch (index) {
@@ -116,21 +107,11 @@ class Test {
             })
             .join('');
 
-        // Create SVG with text
-        //     const text = Buffer.from(`
-        // <svg width="${this.#MAX_IMAGE_WIDTH - this.#BG_PADDING_RIGHT}" height="${
-        //         this.#MAX_TEXT_HEIGHT
-        //     }">
-        //     <text x="0" y="0" style="width:100px;" font-size="${fontSize}">${textLinesSVG}</text>
-        // </svg>
-        // `);
-
         let text = await sharp({
             text: {
                 text: textLinesMarkup,
-                font: 'Arial',
+                fontfile: './NotoColorEmoji-Regular.ttf',
                 rgba: true,
-                wrap: 'char',
                 width: this.#MAX_IMAGE_WIDTH
             }
         }).png();
@@ -170,14 +151,11 @@ class Test {
 
     const x = new Test();
 
-    // TODO: Multiline
-    // TODO: Different fonts
-
     await x.editImageSharp(
         [
             'cico.__',
             'today',
-            'Nepozeraj sa na všetko tak čiernobielo . . . .\n.\n.\n.\n#deepmind #blackAndWhiteIsNotAlwaysRight #WouldntItBeEasierPutTitanfallToF2P #respawnentertainment 🙂'
+            'Nepozeraj sa na všetko tak čiernobielo trošku pohybu treba 😏😊 . . . .\n#deepmind #blackAndWhiteIsNotAlwaysRight #WouldntItBeEasierPutTitanfallToF2P #respawnentertainment 🙂'
         ],
         './testResult.jpg',
         './users-data/cico__/images/17867217443104388.jpg'
