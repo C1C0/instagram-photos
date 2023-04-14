@@ -110,6 +110,7 @@ class Test {
         const text = await sharp({
             text: {
                 text: textLinesMarkup,
+                font: 'Arial',
                 fontfile: './NotoColorEmoji-Regular.ttf',
                 rgba: true,
                 width: this.#MAX_IMAGE_WIDTH
