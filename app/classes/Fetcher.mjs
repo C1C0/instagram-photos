@@ -21,7 +21,7 @@ export default class Fetcher {
     /**
      * @type {string | null}
      */
-    #username = 'cico.__';
+    #username = null;
 
     #mediaFields = ['id', 'caption', 'media_url', 'media_type', 'timestamp'];
     #userFields = ['id', 'username'];
@@ -910,8 +910,8 @@ export default class Fetcher {
     }
 
     async start() {
-        // await this.#fetchUserData();
-        // await this.#getImages();
+        await this.#fetchUserData();
+        await this.#getImages();
         await this.#editImages('sharp');
 
         await this.sleep(1000);
