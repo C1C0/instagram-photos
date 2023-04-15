@@ -67,6 +67,18 @@ Sure, go on. It would be nice, if you would at least let me know, so I have a fe
 
 ## Result
 
-Example:
+### Data
+
+```json
+{
+    "id": "EXAMPLE_ID",
+    "caption": "... že kvet 🌼...",
+    "media_url": "https://scontent-cph2-1.cdninstagram.com/v/EXAMPLE_URL",
+    "media_type": "IMAGE",
+    "timestamp": "2017-07-11T05:55:18+0000"
+},
+```
+
+### Final Image
 
 ![Example](./example.jpg)
