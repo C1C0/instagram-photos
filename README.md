@@ -64,3 +64,9 @@ Sure, go on. It would be nice, if you would at least let me know, so I have a fe
 5.  Login to instagram
 6.  Click that you want to fetch the data
 7.  Wait for data being fetched and enjoy your images (hopefully)
+
+## Result
+
+Example:
+
+![Example](./example.jpg)
