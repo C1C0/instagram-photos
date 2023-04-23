@@ -620,11 +620,9 @@ export default class Fetcher {
             if (imageData.media_type === 'CAROUSEL_ALBUM') {
                 console.log('Album ID: ', imageData.id);
 
-                for (let [index, albumEl] of imageData.children.entries()) {
-                    if (albumEl.media_type === 'VIDEO') {
-                        continue;
-                    }
+                const nonVideoAlbum = imageData.children.filter(el => el.media_type !== 'VIDEO');
 
+                for (let [index, albumEl] of nonVideoAlbum) {
                     console.log('Sub-image ID: ', albumEl.id);
 
                     const arrayCopy = [...textArray];
