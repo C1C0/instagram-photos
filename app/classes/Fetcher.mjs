@@ -147,10 +147,23 @@ export default class Fetcher {
         }
     }
 
+    /**
+     * Removes JSON file if created_at is at least 1hour old
+     * @param {*} mediaFileName
+     * @returns {boolean} if removed, returns true, otherwise false
+     */
     #checkAndRemoveUserJson(mediaFileName) {
-        if (fs.existsSync(mediaFileName)) {
+        const data = this.#getData();
+
+        if (
+            (!data.created_at || data.created_at + 3600000 < Date.now()) &&
+            fs.existsSync(mediaFileName)
+        ) {
             fs.rmSync(mediaFileName);
+            return true;
         }
+
+        return false;
     }
 
     async #fetchAlbumsMedia(album) {
@@ -186,6 +199,8 @@ export default class Fetcher {
     }
 
     async #fetchUserData() {
+        const date = new Date();
+
         await this.#fetchUsername();
         console.log('username fetched');
 
@@ -197,7 +212,12 @@ export default class Fetcher {
         console.log('Media file', mediaFileName);
 
         this.#checkAndCreateMediaFolder(mediaFileName);
-        this.#checkAndRemoveUserJson(mediaFileName);
+
+        if (!this.#checkAndRemoveUserJson(mediaFileName)) {
+            console.log('Previous data file still valid, skipping this step');
+
+            return;
+        }
 
         let body,
             nextLink,
@@ -207,6 +227,7 @@ export default class Fetcher {
         const file = await fs.promises.open(mediaFileName, 'a+');
         await file.write(`
 {
+    "created_at": ${date.getTime()},
     "username":"${this.#username}",
     "data": [
         `);
@@ -281,6 +302,9 @@ export default class Fetcher {
                 fs.writeFileSync(finalDestination, Buffer.from(arrayBuffer));
 
                 if (customMime) {
+                    console.log(
+                        'Sleeping because custome Mime, mime is: ' + mime
+                    );
                     await this.sleep(1000);
                 }
             });
@@ -288,10 +312,13 @@ export default class Fetcher {
         // await this.sleep(300);
     }
 
-    async #getImages() {
+    #getData() {
         const file = fs.readFileSync(this.#getUsersJSONDataPath());
+        return JSON.parse(file.toString());
+    }
 
-        const data = JSON.parse(file.toString());
+    async #getImages() {
+        const data = this.#getData();
 
         const originalImagesFolder = this.#getUsersImagesPath();
         this.#checkAndCreateUsersImageFolder(originalImagesFolder);
@@ -317,9 +344,13 @@ export default class Fetcher {
         console.log('finished fetching images');
     }
 
+    /**
+     * Forcefully removes old content
+     * @param {*} albumFolderPath
+     */
     #checkAndPrepareAlbumFolder(albumFolderPath) {
         if (fs.existsSync(albumFolderPath)) {
-            fs.rmdirSync(albumFolderPath);
+            fs.rmSync(albumFolderPath, { recursive: true });
         }
 
         fs.mkdirSync(albumFolderPath);
@@ -620,9 +651,11 @@ export default class Fetcher {
             if (imageData.media_type === 'CAROUSEL_ALBUM') {
                 console.log('Album ID: ', imageData.id);
 
-                const nonVideoAlbum = imageData.children.filter(el => el.media_type !== 'VIDEO');
+                const nonVideoAlbum = imageData.children.filter(
+                    (el) => el.media_type !== 'VIDEO'
+                );
 
-                for (let [index, albumEl] of nonVideoAlbum) {
+                for (let [index, albumEl] of nonVideoAlbum.entries()) {
                     console.log('Sub-image ID: ', albumEl.id);
 
                     const arrayCopy = [...textArray];
